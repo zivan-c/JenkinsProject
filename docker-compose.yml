@@ -12,6 +12,7 @@ services:
 
   app:
     build: .
+    image: task-crud-app:${APP_VERSION:-latest}
     restart: unless-stopped
     environment:
       PORT: 3000
