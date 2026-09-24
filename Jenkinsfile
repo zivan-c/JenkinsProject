@@ -280,7 +280,7 @@ pipeline {
                     APP_PORT="${PRODUCTION_PORT}" \
                     docker compose \
                         -p "${PRODUCTION_PROJECT}" \
-                        up -d --no-build
+                        up -d --no-build mongo app
 
                     echo "Production deployment started."
 
