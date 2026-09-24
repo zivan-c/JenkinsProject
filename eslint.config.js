@@ -1,14 +1,9 @@
-
-//importing standard js reco rule sets
 const js = require("@eslint/js");
-// importing predefined global var collections
 const globals = require("globals");
 
-
 module.exports = [
-
-    //ignore dependencies, coverage, etc when checking
     {
+    //excludes dependenies, coverage outputs, build artifacts, etc
         ignores: [
             "node_modules/**",
             "coverage/**",
@@ -17,10 +12,44 @@ module.exports = [
         ]
     },
 
+    //base recommended rules
     js.configs.recommended,
-    //applied to all js files
+
+    //configuration files use CommonJS
     {
-        files: ["**/*.js"],
+        files: [
+            "eslint.config.js",
+            "jest.config.js"
+        ],
+
+        languageOptions: {
+            ecmaVersion: "latest",
+            sourceType: "commonjs",
+
+            globals: {
+                ...globals.node //exposes node global objects
+            }
+        },
+
+        rules: {
+            "no-undef": "error",
+            "no-unused-vars": "error",
+            "no-console": "off"
+        }
+    },
+
+    //code of application to be checked
+    {
+        files: [
+            "app.js",
+            "server.js",
+            "config/**/*.js",
+            "controllers/**/*.js",
+            "middleware/**/*.js",
+            "models/**/*.js",
+            "routes/**/*.js",
+            "public/**/*.js"
+        ],
 
         languageOptions: {
             ecmaVersion: "latest",
@@ -32,23 +61,65 @@ module.exports = [
             }
         },
 
-        //implementing linting rules and enforcement
         rules: {
+            // Correctness
             "no-unused-vars": "error",
             "no-undef": "error",
-            "no-console": "off"
+            "no-console": "off",
+
+            // maintainability / complexity quality gate
+            "complexity": ["error", { max: 10 }],
+
+            // limits nested conditional blocks
+            "max-depth": ["error", { max: 4 }],
+
+            //max lines per function
+            "max-lines-per-function": [
+                "error",
+                {
+                    max: 60,
+                    skipBlankLines: true,
+                    skipComments: true
+                }
+            ],
+
+            //restricts max amount of parameters
+            "max-params": ["error", { max: 4 }],
+
+            //restricts max code statements in a function
+            "max-statements": ["error", { max: 30 }],
+
+            //max total lines in a file
+            "max-lines": [
+                "error",
+                {
+                    max: 300,
+                    skipBlankLines: true,
+                    skipComments: true
+                }
+            ]
         }
     },
 
-        //specific adjustments for test files
+    //setup for unit and integration test scripts
     {
         files: ["tests/**/*.js"],
-        //added the globals to prevent crashing
+
         languageOptions: {
+            ecmaVersion: "latest",
+            sourceType: "commonjs",
+
             globals: {
                 ...globals.node,
                 ...globals.jest
             }
+        },
+
+        rules: {
+            //way more relaxed due to them being for testing
+            "no-unused-vars": "error",
+            "no-undef": "error",
+            "no-console": "off"
         }
     }
 ];

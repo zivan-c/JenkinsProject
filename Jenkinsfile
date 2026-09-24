@@ -56,8 +56,26 @@ pipeline {
                 echo 'Starting Code Quality stage...'
 
                 sh 'npm run lint'
+                sh 'npm run lint:report'
 
-                echo 'Code Quality checks completed successfully.'
+                echo 'Code Quality quality gate passed.'
+            }
+
+            post {
+                always {
+                    archiveArtifacts artifacts: 'eslint-report.json',
+                        allowEmptyArchive: true
+                }
+            }
+        }
+
+        stage('Security') {
+            steps {
+                echo 'Starting Security stage...'
+
+                sh 'npm audit --audit-level=high'
+
+                echo 'Security audit completed successfully.'
             }
         }
     }

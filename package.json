@@ -8,7 +8,8 @@
     "dev": "node --watch server.js",
     "test": "jest --runInBand --coverage",
     "test:integration": "jest --runInBand --testPathPatterns=integration",
-    "lint": "eslint ."
+    "lint": "eslint . --max-warnings=0",
+    "lint:report": "eslint . --format json --output-file eslint-report.json"
   },
   "dependencies": {
     "dotenv": "^17.2.1",
