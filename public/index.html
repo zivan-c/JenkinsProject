@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Task Manager</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="container">
+    <h1>Task Manager</h1>
+
+    <section class="card">
+      <h2 id="form-title">Create Task</h2>
+
+      <form id="task-form">
+        <input type="hidden" id="task-id">
+
+        <label for="title">Title</label>
+        <input id="title" type="text" required minlength="2" maxlength="100" placeholder="e.g. Finish assignment">
+
+        <label for="description">Description</label>
+        <textarea id="description" rows="4" maxlength="500" placeholder="Task details"></textarea>
+
+        <div class="row">
+          <div>
+            <label for="status">Status</label>
+            <select id="status">
+              <option value="todo">To Do</option>
+              <option value="in-progress">In Progress</option>
+              <option value="done">Done</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="priority">Priority</label>
+            <select id="priority">
+              <option value="low">Low</option>
+              <option value="medium" selected>Medium</option>
+              <option value="high">High</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="buttons">
+          <button type="submit" id="submit-button">Create Task</button>
+          <button type="button" id="cancel-button" class="secondary hidden">Cancel</button>
+        </div>
+
+        <p id="message"></p>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="tasks-heading">
+        <h2>Tasks</h2>
+        <button type="button" id="refresh-button" class="secondary">Refresh</button>
+      </div>
+      <div id="task-list"></div>
+      <p id="empty-state" class="muted">No tasks yet.</p>
+    </section>
+  </main>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>
