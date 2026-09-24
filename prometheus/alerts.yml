@@ -1,0 +1,53 @@
+groups:
+  - name: task-crud-production-alerts
+
+    rules:
+
+      # Alert when the production application becomes unreachable.
+      - alert: ProductionAppDown
+        expr: up{job="task-crud-production"} == 0
+        for: 15s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Task CRUD production application is down"
+          description: "Prometheus cannot reach the production application."
+
+      # Alert when HTTP 5xx errors become significant.
+      - alert: ProductionHighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{
+              job="task-crud-production",
+              status_code=~"5.."
+            }[1m]))
+            /
+            clamp_min(
+              sum(rate(http_requests_total{
+                job="task-crud-production"
+              }[1m])),
+              1
+            )
+          ) > 0.05
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "High production HTTP error rate"
+          description: "More than 5% of production HTTP requests are returning 5xx responses."
+
+      # Alert when production response latency becomes excessive.
+      - alert: ProductionHighLatency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(http_request_duration_seconds_bucket{
+              job="task-crud-production"
+            }[5m])) by (le)
+          ) > 1
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "High production response latency"
+          description: "95th percentile production HTTP latency is above 1 second."

@@ -23,5 +23,14 @@ services:
       mongo:
         condition: service_healthy
 
+  prometheus:
+    image: prom/prometheus:v3.7.0
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+
 volumes:
   mongo-data:

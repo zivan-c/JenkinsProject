@@ -377,5 +377,81 @@ pipeline {
                 }
             }
         }
+
+        stage('Monitoring') {
+            steps {
+                echo 'Starting Monitoring stage...'
+
+                sh '''
+                    set -eu
+
+                    PROMETHEUS_URL="http://localhost:9090"
+                    PRODUCTION_JOB="task-crud-production"
+
+                    echo "Checking Prometheus availability..."
+
+                    curl -fsS \
+                        "${PROMETHEUS_URL}/-/ready"
+
+                    echo "Prometheus is ready."
+
+                    echo "Checking production monitoring target..."
+
+                    TARGET_RESPONSE="$(
+                        curl -fsS \
+                        "${PROMETHEUS_URL}/api/v1/targets"
+                    )"
+
+                    echo "$TARGET_RESPONSE"
+
+                    echo "$TARGET_RESPONSE" | grep -q '"job":"task-crud-production"'
+
+                    echo "Production monitoring target exists."
+
+                    echo "$TARGET_RESPONSE" | grep -q '"health":"up"'
+
+                    echo "Production monitoring target is UP."
+
+                    echo "Checking configured alert rules..."
+
+                    RULE_RESPONSE="$(
+                        curl -fsS \
+                        "${PROMETHEUS_URL}/api/v1/rules"
+                    )"
+
+                    echo "$RULE_RESPONSE"
+
+                    echo "$RULE_RESPONSE" | grep -q 'ProductionAppDown'
+                    echo "$RULE_RESPONSE" | grep -q 'ProductionHighErrorRate'
+                    echo "$RULE_RESPONSE" | grep -q 'ProductionHighLatency'
+
+                    echo "All required production alert rules are loaded."
+
+                    echo "Querying production availability metric..."
+
+                    QUERY_RESPONSE="$(
+                        curl -fsS \
+                        --get \
+                        --data-urlencode \
+                        'query=up{job="task-crud-production"}' \
+                        "${PROMETHEUS_URL}/api/v1/query"
+                    )"
+
+                    echo "$QUERY_RESPONSE"
+
+                    echo "$QUERY_RESPONSE" | grep -q '"value":\["'
+
+                    echo "Production monitoring check passed."
+                '''
+
+                echo 'Monitoring stage completed successfully.'
+            }
+
+            post {
+                failure {
+                    echo 'Monitoring stage failed. Production monitoring requires attention.'
+                }
+            }
+        }
     }
 }
