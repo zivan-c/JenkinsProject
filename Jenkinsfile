@@ -32,5 +32,23 @@ pipeline {
                 echo 'Build completed successfully.'
                 }
         }
+
+        stage('Test') {
+            steps {
+                echo 'Starting Test stage...'
+
+                sh 'npm test -- --ci'
+            }
+
+            post {
+                always {
+                    junit testResults: 'test-results/junit.xml',
+                        allowEmptyResults: false
+
+                    archiveArtifacts artifacts: 'coverage/**',
+                        allowEmptyArchive: true
+                }
+            }
+        }
     }
 }

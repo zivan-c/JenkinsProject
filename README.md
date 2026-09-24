@@ -1,6 +1,6 @@
 # Basic CRUD MVC Task Manager
 
-This version contains only the CRUD application.
+This version contains the CRUD application, building and testing implementation
 
 ## Stack
 - HTML

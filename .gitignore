@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Testing and Coverage output
+coverage/
+test-results/
+
+# Build artifacts
+artifacts/
+dist/
+build/
+
+# Environment and log files
+.env
+.env.local
+*.log
+npm-debug.log*
+
+# OS metadata
+.DS_Store
