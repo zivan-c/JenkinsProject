@@ -242,5 +242,140 @@ pipeline {
                 }
             }
         }
+
+        stage('Release') {
+            steps {
+                echo 'Starting Release stage...'
+
+                sh '''
+                    set -eu
+
+                    BUILD_VERSION="build-${BUILD_NUMBER}"
+                    RELEASE_VERSION="release-${BUILD_NUMBER}"
+                    PRODUCTION_PORT="3001"
+                    PRODUCTION_PROJECT="task-crud-production"
+
+                    echo "Build version: ${BUILD_VERSION}"
+                    echo "Release version: ${RELEASE_VERSION}"
+
+                    echo "Checking source image..."
+
+                    docker image inspect \
+                        "task-crud-app:${BUILD_VERSION}" > /dev/null
+
+                    echo "Source image exists."
+
+                    echo "Promoting image to release..."
+
+                    docker tag \
+                        "task-crud-app:${BUILD_VERSION}" \
+                        "task-crud-app:${RELEASE_VERSION}"
+
+                    echo "Release image created:"
+                    echo "task-crud-app:${RELEASE_VERSION}"
+
+                    echo "Replacing current production deployment..."
+
+                    APP_VERSION="${RELEASE_VERSION}" \
+                    APP_PORT="${PRODUCTION_PORT}" \
+                    docker compose \
+                        -p "${PRODUCTION_PROJECT}" \
+                        up -d --no-build
+
+                    echo "Production deployment started."
+
+                    docker compose \
+                        -p "${PRODUCTION_PROJECT}" \
+                        ps
+
+                    echo "Checking production containers..."
+
+                    APP_CONTAINER="$(
+                        docker compose \
+                            -p "${PRODUCTION_PROJECT}" \
+                            ps -q app
+                    )"
+
+                    MONGO_CONTAINER="$(
+                        docker compose \
+                            -p "${PRODUCTION_PROJECT}" \
+                            ps -q mongo
+                    )"
+
+                    APP_RUNNING="$(
+                        docker inspect "$APP_CONTAINER" \
+                        --format '{{.State.Running}}'
+                    )"
+
+                    MONGO_HEALTH="$(
+                        docker inspect "$MONGO_CONTAINER" \
+                        --format '{{.State.Health.Status}}'
+                    )"
+
+                    echo "Production application running: ${APP_RUNNING}"
+                    echo "Production MongoDB health: ${MONGO_HEALTH}"
+
+                    if [ "$APP_RUNNING" != "true" ]; then
+                        echo "Production application is not running."
+                        exit 1
+                    fi
+
+                    if [ "$MONGO_HEALTH" != "healthy" ]; then
+                        echo "Production MongoDB is not healthy."
+                        exit 1
+                    fi
+
+                    echo "Testing production HTTP endpoint..."
+
+                    ATTEMPTS=0
+
+                    while ! node -e "
+                        require('http')
+                            .get('http://127.0.0.1:${PRODUCTION_PORT}', res => {
+                                process.exit(
+                                    res.statusCode >= 200 &&
+                                    res.statusCode < 400 ? 0 : 1
+                                )
+                            })
+                            .on('error', () => process.exit(1))
+                    "
+                    do
+                        ATTEMPTS=$((ATTEMPTS + 1))
+
+                        if [ "$ATTEMPTS" -ge 30 ]; then
+                            echo "Production HTTP health check failed."
+                            exit 1
+                        fi
+
+                        echo "Production not ready. Retry ${ATTEMPTS}/30..."
+                        sleep 2
+                    done
+
+                    echo "Production health check passed."
+
+                    echo "Release ${RELEASE_VERSION} successfully promoted to production."
+
+                    printf '%s\\n' \
+                        "Release: ${RELEASE_VERSION}" \
+                        "Source: ${BUILD_VERSION}" \
+                        "Environment: production" \
+                        "Port: ${PRODUCTION_PORT}" \
+                        > "release-${BUILD_NUMBER}.txt"
+                '''
+
+                archiveArtifacts artifacts: "release-${BUILD_NUMBER}.txt",
+                    fingerprint: true
+            }
+
+            post {
+                success {
+                    echo 'Release stage completed successfully.'
+                }
+
+                failure {
+                    echo 'Release stage failed.'
+                }
+            }
+        }
     }
 }

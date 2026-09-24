@@ -18,7 +18,7 @@ services:
       PORT: 3000
       MONGODB_URI: mongodb://mongo:27017/task_crud_app
     ports:
-      - "3000:3000"
+      - "${APP_PORT:-3000}:3000"
     depends_on:
       mongo:
         condition: service_healthy
