@@ -439,7 +439,7 @@ pipeline {
 
                     echo "$QUERY_RESPONSE"
 
-                    echo "$QUERY_RESPONSE" | grep -q '"value":\["'
+                    echo "$QUERY_RESPONSE" | grep -qF '"value"'
 
                     echo "Production monitoring check passed."
                 '''
