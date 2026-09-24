@@ -50,5 +50,15 @@ pipeline {
                 }
             }
         }
+
+        stage('Code Quality') {
+            steps {
+                echo 'Starting Code Quality stage...'
+
+                sh 'npm run lint'
+
+                echo 'Code Quality checks completed successfully.'
+            }
+        }
     }
 }
