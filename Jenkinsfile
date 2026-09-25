@@ -303,7 +303,7 @@ pipeline {
 
                     echo "Source image exists."
 
-                    // promotes image by tagging it with a release tag
+                    # promotes image by tagging it with a release tag
                     echo "Promoting image to release..."
                     
                     docker tag \
