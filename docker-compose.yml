@@ -22,15 +22,27 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
+    networks:
+      default:
+      monitoring:
+        aliases:
+          - "${APP_NETWORK_ALIAS:-staging-app}"
 
   prometheus:
     image: prom/prometheus:v3.7.0
     restart: unless-stopped
     ports:
-      - "9090:9090"
+      - "${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+    networks:
+      - monitoring
 
 volumes:
   mongo-data:
+
+networks:
+  monitoring:
+    name: task-crud-monitoring
+    external: true

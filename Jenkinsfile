@@ -1,22 +1,26 @@
 pipeline {
     agent any
 
+    environment {
+        APP_IMAGE = 'task-crud-app'
+        DEPLOY_PORT = '3000'
+        PRODUCTION_PORT = '3001'
+        PRODUCTION_PROJECT = 'task-crud-production'
+        PROMETHEUS_URL = 'http://localhost:9090'
+        PRODUCTION_JOB = 'task-crud-production'
+        MONITORING_NETWORK = 'task-crud-monitoring'
+    }
+
     stages {
 
-        // Prepares the environment, installs dependencies, and packages the app
         stage('Build') {
             steps {
                 echo 'Starting Build stage...'
 
-                //shows that the versions are working and that the pipeline has access to it
                 sh 'node --version'
                 sh 'npm --version'
-
-
-                //installs the dependencies
                 sh 'npm install'
 
-                //building the artifact and packing it into a compressed tarball artifact
                 sh '''
                     mkdir -p artifacts
                     tar \
@@ -26,42 +30,31 @@ pipeline {
                         -czf artifacts/task-crud-${BUILD_NUMBER}.tar.gz .
                 '''
 
-                //saving the artifact so it can be downloaded 
-                archiveArtifacts artifacts: 'artifacts/*.tar.gz',
-                    fingerprint: true
+                archiveArtifacts artifacts: 'artifacts/*.tar.gz', fingerprint: true
 
                 echo 'Build completed successfully.'
-                }
+            }
         }
 
-        // Runs the automated unit/integration tests
         stage('Test') {
             steps {
                 echo 'Starting Test stage...'
 
-                // runs the test suite in continuous integration mode
                 sh 'npm test -- --ci'
             }
 
             post {
                 always {
-
-                    // processes and saves the JUnit XML test results, failing it if empty
-                    junit testResults: 'test-results/junit.xml',
-                        allowEmptyResults: false
-                    // archives the code coverage reports generated
-                    archiveArtifacts artifacts: 'coverage/**',
-                        allowEmptyArchive: true
+                    junit testResults: 'test-results/junit.xml', allowEmptyResults: false
+                    archiveArtifacts artifacts: 'coverage/**', allowEmptyArchive: true
                 }
             }
         }
 
-        // enforces coding standards and catch syntax errors with a linter
         stage('Code Quality') {
             steps {
                 echo 'Starting Code Quality stage...'
 
-                //runs the linter and generates a report of violations
                 sh 'npm run lint'
                 sh 'npm run lint:report'
 
@@ -70,27 +63,21 @@ pipeline {
 
             post {
                 always {
-
-                    //saves a JSON linter report even if the stage fails
-                    archiveArtifacts artifacts: 'eslint-report.json',
-                        allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'eslint-report.json', allowEmptyArchive: true
                 }
             }
         }
 
-        //scans dependencies for known vulnerabilities
         stage('Security') {
             steps {
                 echo 'Starting Security stage...'
 
-                // fail the pipeline if any 'high' severity vulnerabilities are found
                 sh 'npm audit --audit-level=high'
 
                 echo 'Security audit completed successfully.'
             }
         }
 
-        //builds a docker image, deploys it, runs health checks, and rolls back if it fails
         stage('Deploy') {
             steps {
                 echo 'Starting Deploy stage...'
@@ -98,21 +85,30 @@ pipeline {
                 sh '''
                     set -eu
 
-                    # defining versioning tags using the build number
-                    APP_VERSION="build-${BUILD_NUMBER}"
-                    ROLLBACK_TAG="rollback-${BUILD_NUMBER}"
+                    PIPELINE_ID="$(printf '%s' "${JOB_NAME:-pipeline}" | \
+                        tr '[:upper:]' '[:lower:]' | \
+                        sed 's/[^a-z0-9_-]/-/g; s/^[.-]*//; s/[.-]*$//' | \
+                        cut -c1-40)"
 
+                    [ -n "$PIPELINE_ID" ] || PIPELINE_ID="pipeline"
+
+                    APP_VERSION="${PIPELINE_ID}-build-${BUILD_NUMBER}"
+                    ROLLBACK_TAG="${PIPELINE_ID}-rollback-${BUILD_NUMBER}"
+
+                    echo "Pipeline identifier: ${PIPELINE_ID}"
                     echo "New deployment version: ${APP_VERSION}"
 
-                    # checking that docker is running
                     echo "Checking Docker availability..."
                     docker --version
                     docker compose version
 
+                    echo "Ensuring shared monitoring network exists..."
+                    docker network inspect "${MONITORING_NETWORK}" >/dev/null 2>&1 || \
+                        docker network create "${MONITORING_NETWORK}"
+
                     echo "Checking currently deployed application..."
 
-                    # identifying the current running container and image
-                    CURRENT_CONTAINER="$(docker compose ps -q app || true)"
+                    CURRENT_CONTAINER="$(docker compose -p "${PIPELINE_ID}" ps -q app || true)"
                     PREVIOUS_IMAGE=""
 
                     if [ -n "$CURRENT_CONTAINER" ]; then
@@ -122,33 +118,29 @@ pipeline {
 
                     echo "Previous deployed image: ${PREVIOUS_IMAGE:-none}"
 
-                    # preserve the current image so it can be used for rollback.
                     if [ -n "$PREVIOUS_IMAGE" ]; then
-                        docker tag "$PREVIOUS_IMAGE" "task-crud-app:${ROLLBACK_TAG}"
-                        echo "Rollback image created: task-crud-app:${ROLLBACK_TAG}"
+                        docker tag "$PREVIOUS_IMAGE" "${APP_IMAGE}:${ROLLBACK_TAG}"
+                        echo "Rollback image created: ${APP_IMAGE}:${ROLLBACK_TAG}"
                     fi
 
-                    # building new docker image with the latest code
                     echo "Building application image..."
-                    APP_VERSION="$APP_VERSION" docker compose build app
+                    APP_VERSION="$APP_VERSION" \
+                    APP_PORT="${DEPLOY_PORT}" \
+                    APP_NETWORK_ALIAS="staging-app" \
+                    docker compose -p "${PIPELINE_ID}" build app
 
-                    # deploying the new image in detached mode
                     echo "Deploying ${APP_VERSION}..."
-                    
-                    docker compose stop app
-                    docker compose rm -f app
-                    
-                    APP_VERSION="$APP_VERSION" docker compose up -d --no-build app
+                    APP_VERSION="$APP_VERSION" \
+                    APP_PORT="${DEPLOY_PORT}" \
+                    APP_NETWORK_ALIAS="staging-app" \
+                    docker compose -p "${PIPELINE_ID}" up -d --no-build --force-recreate app
 
                     echo "Checking deployed containers..."
-                    docker compose ps
+                    docker compose -p "${PIPELINE_ID}" ps
 
-                    # extracting  container IDs to check their status
+                    APP_CONTAINER="$(docker compose -p "${PIPELINE_ID}" ps -q app)"
+                    MONGO_CONTAINER="$(docker compose -p "${PIPELINE_ID}" ps -q mongo)"
 
-                    APP_CONTAINER="$(docker compose ps -q app)"
-                    MONGO_CONTAINER="$(docker compose ps -q mongo)"
-
-                    # checking their status
                     APP_RUNNING="$(docker inspect "$APP_CONTAINER" \
                         --format '{{.State.Running}}')"
 
@@ -159,8 +151,6 @@ pipeline {
                     echo "MongoDB health: ${MONGO_HEALTH}"
 
                     DEPLOY_FAILED="false"
-
-                    # flag deployment as failed if core containers arent working properly
 
                     if [ "$APP_RUNNING" != "true" ]; then
                         echo "Application container is not running."
@@ -174,12 +164,11 @@ pipeline {
 
                     echo "Testing application HTTP endpoint..."
 
-                    # loop up to 30 times to verify that the HTTP requests are working
                     ATTEMPTS=0
 
                     while ! node -e "
                         require('http')
-                            .get('http://127.0.0.1:3000', res => {
+                            .get('http://127.0.0.1:${DEPLOY_PORT}', res => {
                                 process.exit(
                                     res.statusCode >= 200 && res.statusCode < 400 ? 0 : 1
                                 )
@@ -189,7 +178,6 @@ pipeline {
                     do
                         ATTEMPTS=$((ATTEMPTS + 1))
 
-                        # if it fails after 30 attempts then mark as fail
                         if [ "$ATTEMPTS" -ge 30 ]; then
                             echo "Application HTTP health check failed."
                             DEPLOY_FAILED="true"
@@ -200,7 +188,6 @@ pipeline {
                         sleep 2
                     done
 
-                    # if it works then exit the script
                     if [ "$DEPLOY_FAILED" = "false" ]; then
                         echo "Deployment health checks passed."
                         echo "Deployment of ${APP_VERSION} completed successfully."
@@ -210,24 +197,22 @@ pipeline {
                     echo "Deployment failed."
                     echo "Starting automatic rollback..."
 
-                    # start of rollback logic
-
                     if [ -z "$PREVIOUS_IMAGE" ]; then
                         echo "No previous deployment was available for rollback."
                         exit 1
                     fi
 
                     echo "Rolling back to previous image..."
-
-                    # starting up old, good image
-                    APP_VERSION="$ROLLBACK_TAG" docker compose up -d --no-build app
+                    APP_VERSION="$ROLLBACK_TAG" \
+                    APP_PORT="${DEPLOY_PORT}" \
+                    APP_NETWORK_ALIAS="staging-app" \
+                    docker compose -p "${PIPELINE_ID}" up -d --no-build --force-recreate app
 
                     echo "Checking rollback deployment..."
-                    docker compose ps
+                    docker compose -p "${PIPELINE_ID}" ps
 
-                    ROLLBACK_CONTAINER="$(docker compose ps -q app)"
+                    ROLLBACK_CONTAINER="$(docker compose -p "${PIPELINE_ID}" ps -q app)"
 
-                    # verify that the rollback container is actually working
                     ROLLBACK_RUNNING="$(docker inspect "$ROLLBACK_CONTAINER" \
                         --format '{{.State.Running}}')"
 
@@ -236,12 +221,11 @@ pipeline {
                         exit 1
                     fi
 
-                    # verify that the rollback container HTTP requests are working
                     ATTEMPTS=0
 
                     while ! node -e "
                         require('http')
-                            .get('http://127.0.0.1:3000', res => {
+                            .get('http://127.0.0.1:${DEPLOY_PORT}', res => {
                                 process.exit(
                                     res.statusCode >= 200 && res.statusCode < 400 ? 0 : 1
                                 )
@@ -277,7 +261,6 @@ pipeline {
             }
         }
 
-        // promotes successful build towards a production environment
         stage('Release') {
             steps {
                 echo 'Starting Release stage...'
@@ -285,42 +268,51 @@ pipeline {
                 sh '''
                     set -eu
 
-                    # variables specific to production
+                    PIPELINE_ID="$(printf '%s' "${JOB_NAME:-pipeline}" | \
+                        tr '[:upper:]' '[:lower:]' | \
+                        sed 's/[^a-z0-9_-]/-/g; s/^[.-]*//; s/[.-]*$//' | \
+                        cut -c1-40)"
 
-                    BUILD_VERSION="build-${BUILD_NUMBER}"
-                    RELEASE_VERSION="release-${BUILD_NUMBER}"
-                    PRODUCTION_PORT="3001"
-                    PRODUCTION_PROJECT="task-crud-production"
+                    [ -n "$PIPELINE_ID" ] || PIPELINE_ID="pipeline"
+
+                    BUILD_VERSION="${PIPELINE_ID}-build-${BUILD_NUMBER}"
+                    RELEASE_VERSION="${PIPELINE_ID}-release-${BUILD_NUMBER}"
 
                     echo "Build version: ${BUILD_VERSION}"
                     echo "Release version: ${RELEASE_VERSION}"
+                    echo "Production project: ${PRODUCTION_PROJECT}"
 
-                    # verify that the docker image that was built exists locally
                     echo "Checking source image..."
-
                     docker image inspect \
-                        "task-crud-app:${BUILD_VERSION}" > /dev/null
+                        "${APP_IMAGE}:${BUILD_VERSION}" > /dev/null
 
                     echo "Source image exists."
 
-                    # promotes image by tagging it with a release tag
+                    # Promotes image by tagging it with a release tag.
                     echo "Promoting image to release..."
-                    
+
                     docker tag \
-                        "task-crud-app:${BUILD_VERSION}" \
-                        "task-crud-app:${RELEASE_VERSION}"
+                        "${APP_IMAGE}:${BUILD_VERSION}" \
+                        "${APP_IMAGE}:${RELEASE_VERSION}"
 
                     echo "Release image created:"
-                    echo "task-crud-app:${RELEASE_VERSION}"
+                    echo "${APP_IMAGE}:${RELEASE_VERSION}"
 
-                    # deploying the release image to production docker compose project
+                    echo "Ensuring shared monitoring network exists..."
+                    docker network inspect "${MONITORING_NETWORK}" >/dev/null 2>&1 || \
+                        docker network create "${MONITORING_NETWORK}"
+
                     echo "Replacing current production deployment..."
 
                     APP_VERSION="${RELEASE_VERSION}" \
                     APP_PORT="${PRODUCTION_PORT}" \
+                    APP_NETWORK_ALIAS="production-app" \
                     docker compose \
                         -p "${PRODUCTION_PROJECT}" \
-                        up -d --no-build mongo app
+                        up -d \
+                        --no-build \
+                        --force-recreate \
+                        app
 
                     echo "Production deployment started."
 
@@ -328,35 +320,24 @@ pipeline {
                         -p "${PRODUCTION_PROJECT}" \
                         ps
 
-                    # run health checks specifically for production containers
                     echo "Checking production containers..."
 
-                    APP_CONTAINER="$(
-                        docker compose \
-                            -p "${PRODUCTION_PROJECT}" \
-                            ps -q app
-                    )"
+                    APP_CONTAINER="$(docker compose \
+                        -p "${PRODUCTION_PROJECT}" \
+                        ps -q app)"
 
-                    MONGO_CONTAINER="$(
-                        docker compose \
-                            -p "${PRODUCTION_PROJECT}" \
-                            ps -q mongo
-                    )"
+                    MONGO_CONTAINER="$(docker compose \
+                        -p "${PRODUCTION_PROJECT}" \
+                        ps -q mongo)"
 
-                    APP_RUNNING="$(
-                        docker inspect "$APP_CONTAINER" \
-                        --format '{{.State.Running}}'
-                    )"
+                    APP_RUNNING="$(docker inspect "$APP_CONTAINER" \
+                        --format '{{.State.Running}}')"
 
-                    MONGO_HEALTH="$(
-                        docker inspect "$MONGO_CONTAINER" \
-                        --format '{{.State.Health.Status}}'
-                    )"
+                    MONGO_HEALTH="$(docker inspect "$MONGO_CONTAINER" \
+                        --format '{{.State.Health.Status}}')"
 
                     echo "Production application running: ${APP_RUNNING}"
                     echo "Production MongoDB health: ${MONGO_HEALTH}"
-
-                    # fail immediately if production containers are down
 
                     if [ "$APP_RUNNING" != "true" ]; then
                         echo "Production application is not running."
@@ -368,7 +349,6 @@ pipeline {
                         exit 1
                     fi
 
-                    # polls the production HTTP endpoint to confirm that its serving traffic
                     echo "Testing production HTTP endpoint..."
 
                     ATTEMPTS=0
@@ -377,8 +357,7 @@ pipeline {
                         require('http')
                             .get('http://127.0.0.1:${PRODUCTION_PORT}', res => {
                                 process.exit(
-                                    res.statusCode >= 200 &&
-                                    res.statusCode < 400 ? 0 : 1
+                                    res.statusCode >= 200 && res.statusCode < 400 ? 0 : 1
                                 )
                             })
                             .on('error', () => process.exit(1))
@@ -396,11 +375,9 @@ pipeline {
                     done
 
                     echo "Production health check passed."
-
                     echo "Release ${RELEASE_VERSION} successfully promoted to production."
 
-                    # generate a release manifest file recording deployment metadata
-                    printf '%s\\n' \
+                    printf '%s\n' \
                         "Release: ${RELEASE_VERSION}" \
                         "Source: ${BUILD_VERSION}" \
                         "Environment: production" \
@@ -408,8 +385,7 @@ pipeline {
                         > "release-${BUILD_NUMBER}.txt"
                 '''
 
-                archiveArtifacts artifacts: "release-${BUILD_NUMBER}.txt",
-                    fingerprint: true
+                archiveArtifacts artifacts: "release-${BUILD_NUMBER}.txt", fingerprint: true
             }
 
             post {
@@ -423,78 +399,85 @@ pipeline {
             }
         }
 
-        // ensures that production monitoring tools (prometheus) are properly tracking the app 
         stage('Monitoring') {
             steps {
                 echo 'Starting Monitoring stage...'
 
                 sh '''
                     set -eu
-                    
-                    PROMETHEUS_URL="http://localhost:9090"
-                    PRODUCTION_JOB="task-crud-production"
-                    
+
+                    PIPELINE_ID="$(printf '%s' "${JOB_NAME:-pipeline}" | \
+                        tr '[:upper:]' '[:lower:]' | \
+                        sed 's/[^a-z0-9_-]/-/g; s/^[.-]*//; s/[.-]*$//' | \
+                        cut -c1-40)"
+
+                    [ -n "$PIPELINE_ID" ] || PIPELINE_ID="pipeline"
+
                     echo "Starting monitoring infrastructure..."
-                    
-                    docker compose up -d prometheus
-                    
+
+                    docker network inspect "${MONITORING_NETWORK}" >/dev/null 2>&1 || \
+                        docker network create "${MONITORING_NETWORK}"
+
+                    docker compose \
+                        -p "${PIPELINE_ID}" \
+                        up -d \
+                        --force-recreate \
+                        prometheus
+
                     echo "Prometheus container started."
-                    
+
                     echo "Checking Prometheus availability..."
-                    
+
                     ATTEMPTS=0
-                    
+
                     until curl -fsS "${PROMETHEUS_URL}/-/ready" > /dev/null
                     do
                         ATTEMPTS=$((ATTEMPTS + 1))
-                    
+
                         if [ "$ATTEMPTS" -ge 30 ]; then
                             echo "Prometheus failed to become ready."
-                            docker compose ps prometheus
-                            docker compose logs prometheus --tail=50
+                            docker compose -p "${PIPELINE_ID}" ps prometheus
+                            docker compose -p "${PIPELINE_ID}" logs prometheus --tail=50
                             exit 1
                         fi
-                    
+
                         echo "Prometheus not ready yet. Retry ${ATTEMPTS}/30..."
                         sleep 2
                     done
-                    
+
                     echo "Prometheus is ready."
 
-                    # checks that prometheus recognizes the prod app as a target
                     echo "Waiting for production monitoring target..."
 
                     ATTEMPTS=0
-                    
+
                     while true
                     do
                         TARGET_RESPONSE="$(
                             curl -fsS \
                             "${PROMETHEUS_URL}/api/v1/targets"
                         )"
-                    
-                        if echo "$TARGET_RESPONSE" | grep -q '"job":"task-crud-production"' &&
+
+                        if echo "$TARGET_RESPONSE" | grep -q "\"job\":\"${PRODUCTION_JOB}\"" && \
                            echo "$TARGET_RESPONSE" | grep -q '"health":"up"'; then
                             break
                         fi
-                    
+
                         ATTEMPTS=$((ATTEMPTS + 1))
-                    
+
                         if [ "$ATTEMPTS" -ge 30 ]; then
                             echo "Production monitoring target did not become healthy."
                             echo "$TARGET_RESPONSE"
-                            docker compose logs prometheus --tail=100
+                            docker compose -p "${PIPELINE_ID}" logs prometheus --tail=100
                             exit 1
                         fi
-                    
+
                         echo "Production target not ready yet. Retry ${ATTEMPTS}/30..."
                         sleep 2
                     done
-                    
-                    echo "Production monitoring target exists."
-                    echo "Production monitoring target is UP."
 
-                    # checks that required alert rules are correctly configured in prometheus
+                    echo "Production monitoring target exists and is UP."
+
                     echo "Checking configured alert rules..."
 
                     RULE_RESPONSE="$(
@@ -510,20 +493,17 @@ pipeline {
 
                     echo "All required production alert rules are loaded."
 
-                    # implementing a test PromQl query to ensure metrics are being gathered
                     echo "Querying production availability metric..."
 
                     QUERY_RESPONSE="$(
                         curl -fsS \
                         --get \
-                        --data-urlencode \
-                        'query=up{job="task-crud-production"}' \
+                        --data-urlencode "query=up{job=\"${PRODUCTION_JOB}\"}" \
                         "${PROMETHEUS_URL}/api/v1/query"
                     )"
 
                     echo "$QUERY_RESPONSE"
 
-                    # ensurs that the query returns a valid metric value
                     echo "$QUERY_RESPONSE" | grep -qF '"value"'
 
                     echo "Production monitoring check passed."
