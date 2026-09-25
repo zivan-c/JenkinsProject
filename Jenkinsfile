@@ -447,8 +447,6 @@ pipeline {
 
                     echo "Prometheus is ready."
 
-                    echo "Waiting for production monitoring target..."
-
                     ATTEMPTS=0
 
                     echo "Waiting for production monitoring target..."
@@ -510,7 +508,7 @@ pipeline {
 
                     echo "Querying production availability metric..."
 
-                    PROMQL_QUERY="up{job=\"${PRODUCTION_JOB}\"}"
+                    PROMQL_QUERY="$(printf 'up{job="%s"}' "${PRODUCTION_JOB}")"
 
                     echo "PromQL query: ${PROMQL_QUERY}"
                     
