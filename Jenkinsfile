@@ -430,16 +430,35 @@ pipeline {
 
                 sh '''
                     set -eu
-
+                    
                     PROMETHEUS_URL="http://localhost:9090"
                     PRODUCTION_JOB="task-crud-production"
-
-                    # verifies that the prometheus monitoring server is running and accessible
+                    
+                    echo "Starting monitoring infrastructure..."
+                    
+                    docker compose up -d prometheus
+                    
+                    echo "Prometheus container started."
+                    
                     echo "Checking Prometheus availability..."
-
-                    curl -fsS \
-                        "${PROMETHEUS_URL}/-/ready"
-
+                    
+                    ATTEMPTS=0
+                    
+                    until curl -fsS "${PROMETHEUS_URL}/-/ready" > /dev/null
+                    do
+                        ATTEMPTS=$((ATTEMPTS + 1))
+                    
+                        if [ "$ATTEMPTS" -ge 30 ]; then
+                            echo "Prometheus failed to become ready."
+                            docker compose ps prometheus
+                            docker compose logs prometheus --tail=50
+                            exit 1
+                        fi
+                    
+                        echo "Prometheus not ready yet. Retry ${ATTEMPTS}/30..."
+                        sleep 2
+                    done
+                    
                     echo "Prometheus is ready."
 
                     # checks that prometheus recognizes the prod app as a target
