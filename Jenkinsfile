@@ -451,27 +451,42 @@ pipeline {
 
                     ATTEMPTS=0
 
+                    echo "Waiting for production monitoring target..."
+
                     while true
                     do
                         TARGET_RESPONSE="$(
                             curl -fsS \
                             "${PROMETHEUS_URL}/api/v1/targets"
                         )"
-
-                        if echo "$TARGET_RESPONSE" | grep -q "\"job\":\"${PRODUCTION_JOB}\"" && \
-                           echo "$TARGET_RESPONSE" | grep -q '"health":"up"'; then
+                    
+                        echo "Expected production monitoring job: ${PRODUCTION_JOB}"
+                    
+                        if node -e '
+                            const response = JSON.parse(process.argv[1]);
+                            const job = process.argv[2];
+                    
+                            const healthy = response.data.activeTargets.some(
+                                target =>
+                                    target.labels &&
+                                    target.labels.job === job &&
+                                    target.health === "up"
+                            );
+                    
+                            process.exit(healthy ? 0 : 1);
+                        ' "$TARGET_RESPONSE" "$PRODUCTION_JOB"; then
                             break
                         fi
-
+                    
                         ATTEMPTS=$((ATTEMPTS + 1))
-
+                    
                         if [ "$ATTEMPTS" -ge 30 ]; then
                             echo "Production monitoring target did not become healthy."
                             echo "$TARGET_RESPONSE"
                             docker compose -p "${PIPELINE_ID}" logs prometheus --tail=100
                             exit 1
                         fi
-
+                    
                         echo "Production target not ready yet. Retry ${ATTEMPTS}/30..."
                         sleep 2
                     done
