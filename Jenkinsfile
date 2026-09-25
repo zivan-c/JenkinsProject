@@ -462,23 +462,36 @@ pipeline {
                     echo "Prometheus is ready."
 
                     # checks that prometheus recognizes the prod app as a target
-                    echo "Checking production monitoring target..."
+                    echo "Waiting for production monitoring target..."
 
-                    TARGET_RESPONSE="$(
-                        curl -fsS \
-                        "${PROMETHEUS_URL}/api/v1/targets"
-                    )"
-
-                    echo "$TARGET_RESPONSE"
-
-                    # verifies that the target job exists and is marked as 'up' by prometheus
-
-                    echo "$TARGET_RESPONSE" | grep -q '"job":"task-crud-production"'
-
+                    ATTEMPTS=0
+                    
+                    while true
+                    do
+                        TARGET_RESPONSE="$(
+                            curl -fsS \
+                            "${PROMETHEUS_URL}/api/v1/targets"
+                        )"
+                    
+                        if echo "$TARGET_RESPONSE" | grep -q '"job":"task-crud-production"' &&
+                           echo "$TARGET_RESPONSE" | grep -q '"health":"up"'; then
+                            break
+                        fi
+                    
+                        ATTEMPTS=$((ATTEMPTS + 1))
+                    
+                        if [ "$ATTEMPTS" -ge 30 ]; then
+                            echo "Production monitoring target did not become healthy."
+                            echo "$TARGET_RESPONSE"
+                            docker compose logs prometheus --tail=100
+                            exit 1
+                        fi
+                    
+                        echo "Production target not ready yet. Retry ${ATTEMPTS}/30..."
+                        sleep 2
+                    done
+                    
                     echo "Production monitoring target exists."
-
-                    echo "$TARGET_RESPONSE" | grep -q '"health":"up"'
-
                     echo "Production monitoring target is UP."
 
                     # checks that required alert rules are correctly configured in prometheus
