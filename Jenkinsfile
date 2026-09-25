@@ -510,13 +510,17 @@ pipeline {
 
                     echo "Querying production availability metric..."
 
+                    PROMQL_QUERY="up{job=\"${PRODUCTION_JOB}\"}"
+
+                    echo "PromQL query: ${PROMQL_QUERY}"
+                    
                     QUERY_RESPONSE="$(
                         curl -fsS \
                         --get \
-                        --data-urlencode "query=up{job=\"${PRODUCTION_JOB}\"}" \
+                        --data-urlencode "query=${PROMQL_QUERY}" \
                         "${PROMETHEUS_URL}/api/v1/query"
                     )"
-
+                    
                     echo "$QUERY_RESPONSE"
 
                     echo "$QUERY_RESPONSE" | grep -qF '"value"'
