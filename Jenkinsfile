@@ -134,6 +134,10 @@ pipeline {
 
                     # deploying the new image in detached mode
                     echo "Deploying ${APP_VERSION}..."
+                    
+                    docker compose stop app
+                    docker compose rm -f app
+                    
                     APP_VERSION="$APP_VERSION" docker compose up -d --no-build app
 
                     echo "Checking deployed containers..."
